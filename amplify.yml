@@ -1,0 +1,19 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - cd ui
+        - npm ci
+    build:
+      commands:
+        - cd ui
+        - echo "{\"version\":\"${AWS_COMMIT_ID}\"}" > public/version.json
+        - npm run build
+  artifacts:
+    baseDirectory: ui/out
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - ui/node_modules/**/*
