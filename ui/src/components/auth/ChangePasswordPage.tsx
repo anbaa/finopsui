@@ -6,13 +6,15 @@ import { Code2, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react'
 
 export function ChangePasswordPage() {
   const { completeNewPassword, signOut } = useAuth()
-  const [newPassword, setNewPassword]     = useState('')
+  const [name, setName]                     = useState('')
+  const [newPassword, setNewPassword]       = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [error, setError]                 = useState<string | null>(null)
-  const [loading, setLoading]             = useState(false)
+  const [error, setError]                   = useState<string | null>(null)
+  const [loading, setLoading]               = useState(false)
 
   // Password rules matching the Cognito pool policy
   function validate(): string | null {
+    if (!name.trim())                         return 'Please enter your full name.'
     if (newPassword.length < 8)               return 'Password must be at least 8 characters.'
     if (!/[A-Z]/.test(newPassword))           return 'Password must contain at least one uppercase letter.'
     if (!/[a-z]/.test(newPassword))           return 'Password must contain at least one lowercase letter.'
@@ -30,12 +32,11 @@ export function ChangePasswordPage() {
 
     setLoading(true)
     try {
-      await completeNewPassword(newPassword)
-      // AuthContext sets requiresNewPassword = false and logs the user in
+      await completeNewPassword(newPassword, name.trim())
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       if (msg.includes('Password does not conform')) {
-        setError('Password does not meet the requirements. Try a stronger password.')
+        setError('Password does not meet requirements. Try a stronger password.')
       } else {
         setError(msg)
       }
@@ -44,7 +45,7 @@ export function ChangePasswordPage() {
     }
   }
 
-  // Password strength indicator
+  // Strength indicator
   const strength = [
     newPassword.length >= 8,
     /[A-Z]/.test(newPassword),
@@ -71,6 +72,22 @@ export function ChangePasswordPage() {
         {/* Card */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-6 py-8">
           <form onSubmit={handleSubmit} className="space-y-4">
+
+            {/* Full Name */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                Full Name
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                autoComplete="name"
+                placeholder="Jane Smith"
+                className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+              />
+            </div>
 
             {/* New Password */}
             <div>
@@ -106,20 +123,15 @@ export function ChangePasswordPage() {
                     ))}
                   </div>
                   <div className="space-y-0.5">
-                    {[
+                    {([
                       [strength[0], '8+ characters'],
                       [strength[1], 'Uppercase letter'],
                       [strength[2], 'Lowercase letter'],
                       [strength[3], 'Number'],
-                    ].map(([met, label]) => (
-                      <div key={String(label)} className="flex items-center gap-1.5 text-xs">
-                        <CheckCircle2
-                          size={11}
-                          className={met ? 'text-green-500' : 'text-slate-300'}
-                        />
-                        <span className={met ? 'text-green-700' : 'text-slate-400'}>
-                          {String(label)}
-                        </span>
+                    ] as [boolean, string][]).map(([met, label]) => (
+                      <div key={label} className="flex items-center gap-1.5 text-xs">
+                        <CheckCircle2 size={11} className={met ? 'text-green-500' : 'text-slate-300'} />
+                        <span className={met ? 'text-green-700' : 'text-slate-400'}>{label}</span>
                       </div>
                     ))}
                   </div>
@@ -160,14 +172,11 @@ export function ChangePasswordPage() {
             {/* Submit */}
             <button
               type="submit"
-              disabled={loading || strengthCount < 4 || newPassword !== confirmPassword}
+              disabled={loading || !name.trim() || strengthCount < 4 || newPassword !== confirmPassword}
               className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
             >
               {loading ? (
-                <>
-                  <Loader2 size={15} className="animate-spin" />
-                  Setting password…
-                </>
+                <><Loader2 size={15} className="animate-spin" />Setting password…</>
               ) : (
                 'Set Password & Sign In'
               )}
@@ -175,12 +184,8 @@ export function ChangePasswordPage() {
           </form>
         </div>
 
-        {/* Back to login */}
         <p className="text-center text-xs text-slate-400 mt-4">
-          <button
-            onClick={signOut}
-            className="text-indigo-500 hover:underline"
-          >
+          <button onClick={signOut} className="text-indigo-500 hover:underline">
             Back to sign in
           </button>
         </p>

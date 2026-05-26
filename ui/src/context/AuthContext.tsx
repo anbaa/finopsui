@@ -28,7 +28,7 @@ export interface AuthContextValue {
   loading: boolean
   requiresNewPassword: boolean
   signIn: (email: string, password: string) => Promise<void>
-  completeNewPassword: (newPassword: string) => Promise<void>
+  completeNewPassword: (newPassword: string, name: string) => Promise<void>
   signOut: () => void
   getIdToken: () => Promise<string>
 }
@@ -40,12 +40,11 @@ export const AuthContext = createContext<AuthContextValue | null>(null)
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser]                       = useState<AuthUser | null>(null)
-  const [loading, setLoading]                 = useState(true)
+  const [user, setUser]                               = useState<AuthUser | null>(null)
+  const [loading, setLoading]                         = useState(true)
   const [requiresNewPassword, setRequiresNewPassword] = useState(false)
-  const sessionRef                            = useRef<CognitoUserSession | null>(null)
-  // Holds the CognitoUser object between signIn and completeNewPassword
-  const pendingUserRef                        = useRef<CognitoUser | null>(null)
+  const sessionRef                                    = useRef<CognitoUserSession | null>(null)
+  const pendingUserRef                                = useRef<CognitoUser | null>(null)
 
   // ── Restore session on mount ─────────────────────────────────────────────
   useEffect(() => {
@@ -79,41 +78,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           reject(new Error(err.message ?? String(err)))
         },
         newPasswordRequired(_userAttributes, _requiredAttributes) {
-          // Store the cognitoUser so completeNewPassword can use it
           pendingUserRef.current = cognitoUser
           setRequiresNewPassword(true)
-          resolve() // don't reject — we handle it in the UI
+          resolve()
         },
       })
     })
   }, [])
 
   // ── completeNewPassword ──────────────────────────────────────────────────
-  const completeNewPassword = useCallback(async (newPassword: string): Promise<void> => {
-    const cognitoUser = pendingUserRef.current
-    if (!cognitoUser) throw new Error('No pending password change — please sign in again')
+  const completeNewPassword = useCallback(
+    async (newPassword: string, name: string): Promise<void> => {
+      const cognitoUser = pendingUserRef.current
+      if (!cognitoUser) throw new Error('No pending password change — please sign in again')
 
-    return new Promise((resolve, reject) => {
-      cognitoUser.completeNewPasswordChallenge(newPassword, {}, {
-        onSuccess(session) {
-          sessionRef.current = session
-          setUser(extractUser(session))
-          setRequiresNewPassword(false)
-          pendingUserRef.current = null
-          resolve()
-        },
-        onFailure(err) {
-          reject(new Error(err.message ?? String(err)))
-        },
+      return new Promise((resolve, reject) => {
+        cognitoUser.completeNewPasswordChallenge(
+          newPassword,
+          { name }, // pass required attributes
+          {
+            onSuccess(session) {
+              sessionRef.current    = session
+              pendingUserRef.current = null
+              setUser(extractUser(session))
+              setRequiresNewPassword(false)
+              resolve()
+            },
+            onFailure(err) {
+              reject(new Error(err.message ?? String(err)))
+            },
+          }
+        )
       })
-    })
-  }, [])
+    },
+    []
+  )
 
   // ── signOut ──────────────────────────────────────────────────────────────
   const signOut = useCallback(() => {
     if (!userPool) return
     userPool.getCurrentUser()?.signOut()
-    sessionRef.current    = null
+    sessionRef.current     = null
     pendingUserRef.current = null
     setUser(null)
     setRequiresNewPassword(false)
