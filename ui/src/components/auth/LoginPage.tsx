@@ -3,13 +3,19 @@
 import { useState, FormEvent } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import { Code2, Loader2, AlertCircle } from 'lucide-react'
+import { ChangePasswordPage } from './ChangePasswordPage'
 
 export function LoginPage() {
-  const { signIn } = useAuth()
+  const { signIn, requiresNewPassword } = useAuth()
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
   const [error, setError]       = useState<string | null>(null)
   const [loading, setLoading]   = useState(false)
+
+  // If Cognito requires a new password, show the change password screen
+  if (requiresNewPassword) {
+    return <ChangePasswordPage />
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -17,17 +23,16 @@ export function LoginPage() {
     setLoading(true)
     try {
       await signIn(email.trim(), password)
+      // If requiresNewPassword becomes true, the component re-renders
+      // and shows <ChangePasswordPage /> automatically
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      // Surface friendly messages for common Cognito errors
       if (msg.includes('Incorrect username or password')) {
         setError('Incorrect email or password.')
       } else if (msg.includes('User does not exist')) {
         setError('No account found with that email.')
       } else if (msg.includes('User is not confirmed')) {
         setError('Please verify your email before signing in.')
-      } else if (msg === 'NEW_PASSWORD_REQUIRED') {
-        setError('A new password is required. Contact your administrator.')
       } else {
         setError(msg)
       }
@@ -45,7 +50,7 @@ export function LoginPage() {
             <Code2 size={26} className="text-white" />
           </div>
           <div className="text-center">
-            <h1 className="text-xl font-bold text-slate-900">Script Generator AI</h1>
+            <h1 className="text-xl font-bold text-slate-900">FinOps Hub</h1>
             <p className="text-sm text-slate-500 mt-0.5">Sign in to continue</p>
           </div>
         </div>

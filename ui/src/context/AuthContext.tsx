@@ -8,9 +8,9 @@ import {
   CognitoUserSession,
 } from 'amazon-cognito-identity-js'
 
-// ── Cognito pool config (injected at build time via Amplify env vars) ──────────
-const POOL_ID     = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID ?? ''
-const CLIENT_ID   = process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID    ?? ''
+// ── Cognito pool config ───────────────────────────────────────────────────────
+const POOL_ID   = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID ?? ''
+const CLIENT_ID = process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID    ?? ''
 
 const userPool = POOL_ID && CLIENT_ID
   ? new CognitoUserPool({ UserPoolId: POOL_ID, ClientId: CLIENT_ID })
@@ -26,9 +26,10 @@ export interface AuthUser {
 export interface AuthContextValue {
   user: AuthUser | null
   loading: boolean
+  requiresNewPassword: boolean
   signIn: (email: string, password: string) => Promise<void>
+  completeNewPassword: (newPassword: string) => Promise<void>
   signOut: () => void
-  /** Returns a fresh id_token, refreshing silently if needed. */
   getIdToken: () => Promise<string>
 }
 
@@ -39,27 +40,20 @@ export const AuthContext = createContext<AuthContextValue | null>(null)
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser]       = useState<AuthUser | null>(null)
-  const [loading, setLoading] = useState(true)
-  // Cache the last good session so getIdToken is cheap
-  const sessionRef = useRef<CognitoUserSession | null>(null)
+  const [user, setUser]                       = useState<AuthUser | null>(null)
+  const [loading, setLoading]                 = useState(true)
+  const [requiresNewPassword, setRequiresNewPassword] = useState(false)
+  const sessionRef                            = useRef<CognitoUserSession | null>(null)
+  // Holds the CognitoUser object between signIn and completeNewPassword
+  const pendingUserRef                        = useRef<CognitoUser | null>(null)
 
   // ── Restore session on mount ─────────────────────────────────────────────
   useEffect(() => {
-    if (!userPool) {
-      setLoading(false)
-      return
-    }
+    if (!userPool) { setLoading(false); return }
     const cognitoUser = userPool.getCurrentUser()
-    if (!cognitoUser) {
-      setLoading(false)
-      return
-    }
+    if (!cognitoUser) { setLoading(false); return }
     cognitoUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
-      if (err || !session?.isValid()) {
-        setLoading(false)
-        return
-      }
+      if (err || !session?.isValid()) { setLoading(false); return }
       sessionRef.current = session
       setUser(extractUser(session))
       setLoading(false)
@@ -78,14 +72,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         onSuccess(session) {
           sessionRef.current = session
           setUser(extractUser(session))
+          setRequiresNewPassword(false)
           resolve()
         },
         onFailure(err) {
           reject(new Error(err.message ?? String(err)))
         },
-        // If the pool requires a password change on first login
         newPasswordRequired(_userAttributes, _requiredAttributes) {
-          reject(new Error('NEW_PASSWORD_REQUIRED'))
+          // Store the cognitoUser so completeNewPassword can use it
+          pendingUserRef.current = cognitoUser
+          setRequiresNewPassword(true)
+          resolve() // don't reject — we handle it in the UI
+        },
+      })
+    })
+  }, [])
+
+  // ── completeNewPassword ──────────────────────────────────────────────────
+  const completeNewPassword = useCallback(async (newPassword: string): Promise<void> => {
+    const cognitoUser = pendingUserRef.current
+    if (!cognitoUser) throw new Error('No pending password change — please sign in again')
+
+    return new Promise((resolve, reject) => {
+      cognitoUser.completeNewPasswordChallenge(newPassword, {}, {
+        onSuccess(session) {
+          sessionRef.current = session
+          setUser(extractUser(session))
+          setRequiresNewPassword(false)
+          pendingUserRef.current = null
+          resolve()
+        },
+        onFailure(err) {
+          reject(new Error(err.message ?? String(err)))
         },
       })
     })
@@ -94,16 +112,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── signOut ──────────────────────────────────────────────────────────────
   const signOut = useCallback(() => {
     if (!userPool) return
-    const cognitoUser = userPool.getCurrentUser()
-    cognitoUser?.signOut()
-    sessionRef.current = null
+    userPool.getCurrentUser()?.signOut()
+    sessionRef.current    = null
+    pendingUserRef.current = null
     setUser(null)
+    setRequiresNewPassword(false)
   }, [])
 
   // ── getIdToken ───────────────────────────────────────────────────────────
   const getIdToken = useCallback(async (): Promise<string> => {
     if (!userPool) throw new Error('Cognito is not configured')
-
     const cognitoUser = userPool.getCurrentUser()
     if (!cognitoUser) throw new Error('Not authenticated')
 
@@ -120,7 +138,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, getIdToken }}>
+    <AuthContext.Provider value={{
+      user, loading, requiresNewPassword,
+      signIn, completeNewPassword, signOut, getIdToken,
+    }}>
       {children}
     </AuthContext.Provider>
   )
